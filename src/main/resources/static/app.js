@@ -1,4 +1,6 @@
 (() => {
+  // 项目标识日志（在控制台可见）
+  try { console.log('--本项目由@labi-xiaoxin搭建开发'); } catch(_){}
   const currentPathEl = document.getElementById('currentPath');
   const tableBody = document.getElementById('fileTableBody');
   const upBtn = document.getElementById('upBtn');
