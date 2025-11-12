@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -79,9 +80,10 @@ public class FileController {
 
     @PostMapping(value = "/files/upload")
     public Map<String, Object> upload(@RequestParam("path") String path,
-                                      @RequestParam("file") MultipartFile file) {
+                                      @RequestParam("file") MultipartFile file,
+                                      @RequestParam(value = "relativePath", required = false) String relativePath) {
         try {
-            Path saved = fileService.upload(path, file);
+            Path saved = fileService.upload(path, file, relativePath);
             Map<String, Object> res = new HashMap<>();
             res.put("path", "/" + fileService.getRoot().relativize(saved).toString().replace('\\', '/'));
             res.put("name", saved.getFileName().toString());
@@ -156,6 +158,24 @@ public class FileController {
                     return new DeleteResult(p, false, e.getMessage());
                 }
             }).collect(Collectors.toList());
+        } catch (Exception e) {
+            throw translate(e);
+        }
+    }
+
+    @GetMapping("/files/batch-download")
+    public ResponseEntity<StreamingResponseBody> batchDownload(@RequestParam("paths") List<String> paths) {
+        try {
+            if (paths == null || paths.isEmpty()) {
+                throw new IllegalArgumentException("No paths provided");
+            }
+            String filename = "download-" + Instant.now().toEpochMilli() + ".zip";
+            String encoded = URLEncoder.encode(filename, StandardCharsets.UTF_8.name()).replaceAll("\\+", "%20");
+            StreamingResponseBody body = outputStream -> fileService.zipPaths(paths, outputStream);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encoded)
+                    .contentType(MediaType.parseMediaType("application/zip"))
+                    .body(body);
         } catch (Exception e) {
             throw translate(e);
         }

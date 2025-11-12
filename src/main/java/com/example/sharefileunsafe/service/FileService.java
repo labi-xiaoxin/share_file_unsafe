@@ -7,13 +7,17 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Service
 public class FileService {
@@ -54,6 +58,10 @@ public class FileService {
     }
 
     public Path upload(String targetDirPath, MultipartFile file) {
+        return upload(targetDirPath, file, null);
+    }
+
+    public Path upload(String targetDirPath, MultipartFile file, String relativePath) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Uploaded file is empty");
         }
@@ -64,12 +72,23 @@ public class FileService {
         if (!Files.isDirectory(dir)) {
             throw new IllegalArgumentException("Target path is not a directory: " + dir);
         }
-        Path target = dir.resolve(file.getOriginalFilename()).normalize();
+        String rp = relativePath;
+        if (rp == null || rp.trim().isEmpty()) {
+            rp = file.getOriginalFilename();
+        }
+        rp = rp.replace('\\', '/');
+        Path target = dir.resolve(rp).normalize();
         if (!target.startsWith(root)) {
             throw new IllegalArgumentException("Target path escapes root");
         }
-        try (InputStream in = file.getInputStream()) {
-            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Path parent = target.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             throw new RuntimeException("Failed to store file: " + target, e);
         }
@@ -178,6 +197,71 @@ public class FileService {
             return Files.isDirectory(p);
         } catch (Exception ignored) {
             return false;
+        }
+    }
+
+    /**
+     * 将给定的路径（文件或目录）压缩为Zip并写入输出流。
+     * 目录会以其自身名称作为Zip中的顶层目录。
+     */
+    public void zipPaths(List<String> paths, OutputStream out) {
+        Objects.requireNonNull(paths, "paths");
+        try (ZipOutputStream zos = new ZipOutputStream(out)) {
+            for (String pathStr : paths) {
+                Path p = resolve(pathStr);
+                if (!Files.exists(p)) {
+                    // 跳过不存在的路径
+                    continue;
+                }
+                if (Files.isDirectory(p)) {
+                    String top = p.getFileName() != null ? p.getFileName().toString() : p.toString();
+                    // 遍历目录并写入条目（跳过根本身的重复目录条目）
+                    try (Stream<Path> walk = Files.walk(p)) {
+                        walk.forEach(pp -> {
+                            String rel = p.relativize(pp).toString().replace('\\', '/');
+                            String entryName = top + (rel.isEmpty() ? "" : "/" + rel);
+                            try {
+                                if (Files.isDirectory(pp)) {
+                                    // 为目录写入占位条目
+                                    String dirName = entryName.endsWith("/") ? entryName : (entryName + "/");
+                                    zos.putNextEntry(new ZipEntry(dirName));
+                                    zos.closeEntry();
+                                } else {
+                                    // 写入文件内容
+                                    zos.putNextEntry(new ZipEntry(entryName));
+                                    byte[] buf = new byte[8192];
+                                    try (InputStream in = Files.newInputStream(pp, StandardOpenOption.READ)) {
+                                        int len;
+                                        while ((len = in.read(buf)) > 0) {
+                                            zos.write(buf, 0, len);
+                                        }
+                                    }
+                                    zos.closeEntry();
+                                }
+                            } catch (IOException e) {
+                                throw new RuntimeException("Failed to zip entry: " + pp, e);
+                            }
+                        });
+                    }
+                } else {
+                    String entryName = p.getFileName() != null ? p.getFileName().toString() : p.toString();
+                    try {
+                        zos.putNextEntry(new ZipEntry(entryName));
+                        byte[] buf = new byte[8192];
+                        try (InputStream in = Files.newInputStream(p, StandardOpenOption.READ)) {
+                            int len;
+                            while ((len = in.read(buf)) > 0) {
+                                zos.write(buf, 0, len);
+                            }
+                        }
+                        zos.closeEntry();
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to zip file: " + p, e);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create zip", e);
         }
     }
 }

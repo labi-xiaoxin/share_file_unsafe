@@ -7,9 +7,124 @@
   const refreshBtn = document.getElementById('refreshBtn');
   const uploadHidden = document.getElementById('uploadHidden');
   const uploadBtn = document.getElementById('uploadBtn');
+  const batchDownloadBtn = document.getElementById('batchDownloadBtn');
   const progressList = document.getElementById('uploadProgress');
   const mkdirBtn = document.getElementById('mkdirBtn');
   const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+  const selectAllEl = document.getElementById('selectAll');
+
+  // 自定义弹框元素
+  const modalOverlay = document.getElementById('modalOverlay');
+  const modalTitleEl = document.getElementById('modalTitle');
+  const modalBodyEl = document.getElementById('modalBody');
+  const modalFooterEl = document.getElementById('modalFooter');
+  const modalCloseBtn = document.getElementById('modalClose');
+
+  function hideModal(){
+    try {
+      modalOverlay.classList.remove('show');
+      modalOverlay.setAttribute('aria-hidden', 'true');
+      modalBodyEl.innerHTML = '';
+      modalFooterEl.innerHTML = '';
+      modalCloseBtn.onclick = null;
+      modalOverlay.onclick = null;
+    } catch(_){ }
+  }
+
+  function showModal(title, bodyContent, buttons){
+    return new Promise((resolve) => {
+      try {
+        modalTitleEl.textContent = title || '提示';
+        // 内容
+        modalBodyEl.innerHTML = '';
+        if (typeof bodyContent === 'string'){
+          const text = document.createElement('div');
+          text.textContent = bodyContent;
+          modalBodyEl.appendChild(text);
+        } else if (bodyContent instanceof Node) {
+          modalBodyEl.appendChild(bodyContent);
+        }
+        // 按钮
+        modalFooterEl.innerHTML = '';
+        const complete = (value) => { hideModal(); resolve(value); };
+        for (const btn of (buttons || [])){
+          const b = document.createElement('button');
+          b.textContent = btn.text || '确定';
+          b.className = btn.className || 'btn-primary';
+          b.onclick = () => complete(btn.value);
+          modalFooterEl.appendChild(b);
+        }
+        // 展示与关闭规则
+        modalOverlay.classList.add('show');
+        modalOverlay.setAttribute('aria-hidden', 'false');
+        modalCloseBtn.onclick = () => complete(undefined);
+        modalOverlay.onclick = (e) => { if (e.target === modalOverlay) complete(undefined); };
+      } catch(err){ console.error(err); resolve(undefined); }
+    });
+  }
+
+  async function uiAlert(message, title){
+    await showModal(title || '提示', message, [ { text: '确定', className: 'btn-primary', value: true } ]);
+  }
+
+  async function uiConfirm(message, title){
+    const val = await showModal(title || '确认', message, [
+      { text: '取消', className: 'btn-secondary', value: false },
+      { text: '确定', className: 'btn-primary', value: true }
+    ]);
+    return !!val;
+  }
+
+  async function uiPrompt(title, defaultValue){
+    const wrap = document.createElement('div');
+    const label = document.createElement('div');
+    label.style.marginBottom = '8px';
+    label.textContent = title || '请输入内容';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = (defaultValue ?? '');
+    wrap.append(label, input);
+    return new Promise((resolve) => {
+      const finish = (val) => { hideModal(); resolve(val); };
+      modalTitleEl.textContent = '输入';
+      modalBodyEl.innerHTML = '';
+      modalBodyEl.appendChild(wrap);
+      modalFooterEl.innerHTML = '';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = '取消';
+      cancelBtn.className = 'btn-secondary';
+      cancelBtn.onclick = () => finish(null);
+      const okBtn = document.createElement('button');
+      okBtn.textContent = '确定';
+      okBtn.className = 'btn-primary';
+      okBtn.onclick = () => finish(input.value);
+      modalFooterEl.append(cancelBtn, okBtn);
+      modalOverlay.classList.add('show');
+      modalOverlay.setAttribute('aria-hidden', 'false');
+      modalCloseBtn.onclick = () => finish(null);
+      modalOverlay.onclick = (e) => { if (e.target === modalOverlay) finish(null); };
+      setTimeout(() => { try { input.focus(); input.select(); } catch(_){ } }, 50);
+      const keyHandler = (e) => { if (e.key === 'Escape') finish(null); else if (e.key === 'Enter') finish(input.value); };
+      document.addEventListener('keydown', keyHandler, { once: true });
+    });
+  }
+
+  function updateSelectAllState(){
+    if (!selectAllEl) return;
+    const boxes = tableBody.querySelectorAll('.row-select');
+    const total = boxes.length;
+    const checked = tableBody.querySelectorAll('.row-select:checked').length;
+    selectAllEl.checked = (total > 0 && checked === total);
+    selectAllEl.indeterminate = (checked > 0 && checked < total);
+  }
+  if (selectAllEl){
+    selectAllEl.addEventListener('change', () => {
+      const checked = selectAllEl.checked;
+      const boxes = tableBody.querySelectorAll('.row-select');
+      boxes.forEach(b => { b.checked = checked; });
+      updateSelectAllState();
+    });
+  }
 
   let currentPath = '/';
 
@@ -39,6 +154,13 @@
 
   async function apiDownload(path){
     window.location.href = `/api/files/download?path=${encodeURIComponent(path)}`;
+  }
+
+  function apiBatchDownload(paths){
+    const qs = paths.map(p => `paths=${encodeURIComponent(p)}`).join('&');
+    const url = `/api/files/batch-download?${qs}`;
+    // 直接跳转触发浏览器下载
+    window.location.href = url;
   }
 
   async function apiUpload(path, file){
@@ -101,6 +223,7 @@
       sel.type = 'checkbox';
       sel.className = 'row-select';
       sel.dataset.path = it.path;
+      sel.addEventListener('change', updateSelectAllState);
       selTd.appendChild(sel);
       tr.appendChild(selTd);
       const nameTd = document.createElement('td');
@@ -143,25 +266,33 @@
       const renameBtn = document.createElement('button');
       renameBtn.textContent = '重命名';
       renameBtn.onclick = async () => {
-        const newName = prompt('输入新名称', it.name);
+        const newName = await uiPrompt('输入新名称', it.name);
         if (!newName) return;
-        try { await apiRename(it.path, newName); await load(); } catch(e){ alert(e.message); }
+        try { await apiRename(it.path, newName); await load(); } catch(e){ await uiAlert(e.message); }
       };
       const moveBtn = document.createElement('button');
       moveBtn.textContent = '移动到';
       moveBtn.onclick = async () => {
-        const targetDir = prompt('输入目标目录（绝对路径，如 /folder）', '/');
+        const targetDir = await uiPrompt('输入目标目录（绝对路径，如 /folder）', '/');
         if (!targetDir) return;
-        try { await apiMove(it.path, targetDir); await load(); } catch(e){ alert(e.message); }
+        try { await apiMove(it.path, targetDir); await load(); } catch(e){ await uiAlert(e.message); }
       };
       const delBtn = document.createElement('button');
       delBtn.textContent = '删除';
       delBtn.onclick = async () => {
         const tip = it.directory ? `确认删除目录及其所有内容：${it.name} ？` : `确认删除文件 ${it.name} ？`;
-        if (!confirm(tip)) return;
-        try { await apiDelete(it.path); await load(); } catch(e){ alert(e.message); }
+        const ok = await uiConfirm(tip);
+        if (!ok) return;
+        try { await apiDelete(it.path); await load(); } catch(e){ await uiAlert(e.message); }
       };
-      opsTd.append(renameBtn, moveBtn, delBtn);
+      if (it.directory){
+        const dlBtn = document.createElement('button');
+        dlBtn.textContent = '下载';
+        dlBtn.onclick = () => { apiBatchDownload([it.path]); };
+        opsTd.append(renameBtn, moveBtn, delBtn, dlBtn);
+      } else {
+        opsTd.append(renameBtn, moveBtn, delBtn);
+      }
       tr.appendChild(opsTd);
 
       tableBody.appendChild(tr);
@@ -173,7 +304,7 @@
       const items = await apiList(currentPath);
       renderList(items);
     } catch(e){
-      alert(e.message);
+      await uiAlert(e.message);
     }
   }
 
@@ -240,7 +371,7 @@
             try { resolve(JSON.parse(xhr.responseText)); }
             catch { resolve({ ok: true }); }
           } else {
-            progress.setStatus('失败');
+            progress.setStatus(xhr.status === 0 ? '被浏览器阻止' : '失败');
             setTimeout(() => { try { progress.remove(); } catch(_){} }, 5000);
             reject(new Error('上传失败: ' + xhr.status));
           }
@@ -255,6 +386,11 @@
 
       const fd = new FormData();
       fd.append('path', path);
+      // 传递相对路径，后端按层级创建目录
+      const rel = (file.webkitRelativePath && file.webkitRelativePath.length > 0)
+        ? file.webkitRelativePath
+        : (file._relativePath || file.name);
+      fd.append('relativePath', rel);
       fd.append('file', file);
       xhr.send(fd);
     });
@@ -279,7 +415,10 @@
     const out = [];
     for (const f of arr){
       if (!f) continue;
-      const key = [f.name, f.size, f.type, f.lastModified].join('|');
+      const rel = (f.webkitRelativePath && f.webkitRelativePath.length > 0)
+        ? f.webkitRelativePath
+        : (f._relativePath || f.name);
+      const key = [rel, f.name, f.size, f.type, f.lastModified].join('|');
       if (!set.has(key)) { set.add(key); out.push(f); }
     }
     return out;
@@ -290,14 +429,19 @@
     try {
       if (clipboardData && clipboardData.items) {
         for (const item of clipboardData.items) {
-          if (item.kind === 'file') {
+          // 仅接受具备明确 MIME 类型的文件，过滤目录或不可识别项
+          if (item.kind === 'file' && item.type && item.type.length > 0) {
             const f = item.getAsFile();
-            if (f) files.push(f);
+            if (f && typeof f.name === 'string' && typeof f.size === 'number') {
+              files.push(f);
+            }
           }
         }
       }
       if (clipboardData && clipboardData.files && clipboardData.files.length > 0) {
-        for (const f of clipboardData.files) { files.push(f); }
+        for (const f of clipboardData.files) {
+          if (f && f.type && f.type.length > 0) { files.push(f); }
+        }
       }
     } catch(_){}
     return dedupeFiles(files);
@@ -321,6 +465,10 @@
       if (files.length > 0) {
         e.preventDefault();
         await uploadFilesSequential(files);
+      } else {
+        // 说明剪贴板未提供文件对象或浏览器限制
+        // 目前浏览器不支持通过粘贴读取本地目录，请使用拖拽或文件选择
+        await uiAlert('剪贴板未提供可上传的文件。浏览器不支持粘贴本地目录，请使用拖拽或“上传文件”。');
       }
     } catch(err){
       console.error('粘贴上传失败', err);
@@ -335,14 +483,57 @@
     e.preventDefault();
     try {
       const files = [];
+
+      // 支持目录拖拽：使用 webkitGetAsEntry 递归遍历
       if (e.dataTransfer && e.dataTransfer.items) {
-        for (const item of e.dataTransfer.items){
-          if (item.kind === 'file'){
-            const f = item.getAsFile();
-            if (f) files.push(f);
+        // 先收集顶层 entries，避免在迭代中状态被改变导致漏读
+        const entries = [];
+        for (const item of e.dataTransfer.items) {
+          if (item.kind === 'file') {
+            const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+            if (entry) entries.push(entry);
+            else {
+              const f = item.getAsFile();
+              if (f) files.push(f);
+            }
           }
         }
+
+        const traverseEntry = async (entry, prefix) => {
+          prefix = prefix || '';
+          if (entry.isFile) {
+            await new Promise((resolve, reject) => {
+              entry.file((f) => {
+                try {
+                  f._relativePath = (prefix ? prefix + '/' : '') + f.name;
+                  files.push(f);
+                  resolve();
+                } catch(err){ reject(err); }
+              }, reject);
+            });
+          } else if (entry.isDirectory) {
+            await new Promise((resolve, reject) => {
+              const reader = entry.createReader();
+              const batch = () => {
+                reader.readEntries(async (entries) => {
+                  if (!entries || entries.length === 0) return resolve();
+                  for (const ent of entries) {
+                    await traverseEntry(ent, (prefix ? prefix + '/' : '') + entry.name);
+                  }
+                  batch();
+                }, reject);
+              };
+              batch();
+            });
+          }
+        };
+        // 并行遍历多个顶层目录，避免只处理第一个
+        for (const entry of entries) {
+          await traverseEntry(entry, '');
+        }
       }
+
+      // 退化方案：直接读取 files 列表（可能带有 webkitRelativePath）
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         for (const f of e.dataTransfer.files) { files.push(f); }
       }
@@ -355,9 +546,9 @@
     }
   });
   mkdirBtn.onclick = async () => {
-    const name = prompt('输入文件夹名称');
+    const name = await uiPrompt('输入文件夹名称');
     if (!name) return;
-    try { await apiMkdir(currentPath, name); await load(); } catch(e){ alert(e.message); }
+    try { await apiMkdir(currentPath, name); await load(); } catch(e){ await uiAlert(e.message); }
   };
 
   function getSelectedPaths(){
@@ -367,24 +558,38 @@
 
   batchDeleteBtn.onclick = async () => {
     const paths = getSelectedPaths();
-    if (paths.length === 0){ alert('请先勾选要删除的项目'); return; }
-    if (!confirm(`确认删除选中的 ${paths.length} 个项目？目录将递归删除其所有内容。`)) return;
+    if (paths.length === 0){ await uiAlert('请先勾选要删除的项目'); return; }
+    const ok = await uiConfirm(`确认删除选中的 ${paths.length} 个项目？目录将递归删除其所有内容。`);
+    if (!ok) return;
     try {
       const results = await apiBatchDelete(paths);
       const failed = results.filter(r => !r.deleted);
       if (failed.length > 0){
         const msg = '部分项目删除失败:\n' + failed.slice(0,5).map(r => `- ${r.path} (${r.error || '失败'})`).join('\n') + (failed.length > 5 ? `\n... 共 ${failed.length} 项失败` : '');
-        alert(msg);
+        await uiAlert(msg);
       } else {
-        alert('已删除选中的所有项目');
+        await uiAlert('已删除选中的所有项目');
       }
       await load();
     } catch(e){
-      alert(e.message);
+      await uiAlert(e.message);
     }
+  };
+
+  batchDownloadBtn.onclick = async () => {
+    const paths = getSelectedPaths();
+    if (paths.length === 0){ await uiAlert('请先勾选要下载的项目'); return; }
+    apiBatchDownload(paths);
   };
 
   // 初始加载
   currentPathEl.textContent = currentPath;
   load();
+  // 渲染后同步“全选”状态
+  const origRenderList = renderList;
+  const renderListRef = renderList;
+  renderList = function(items){
+    renderListRef(items);
+    updateSelectAllState();
+  };
 })();

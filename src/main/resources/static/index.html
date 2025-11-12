@@ -28,6 +28,21 @@
     .progress-bar { flex: 1; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
     .progress-bar-inner { height: 100%; width: 0%; background: #2ea043; transition: width 0.1s ease; }
     .progress-status { min-width: 80px; text-align: right; color: #666; font-size: 12px; }
+    /* 自定义弹框样式 */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .modal-overlay.show { display: flex; }
+    .modal { width: 380px; max-width: 92vw; background: #fff; border-radius: 12px; box-shadow: 0 10px 28px rgba(0,0,0,0.22); overflow: hidden; }
+    .modal-header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+    .modal-title { font-size: 15px; }
+    .modal-close { background: transparent; border: none; font-size: 18px; line-height: 1; cursor: pointer; color: #666; }
+    .modal-close:hover { color: #111; }
+    .modal-body { padding: 16px; color: #333; }
+    .modal-body input[type="text"] { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+    .modal-footer { padding: 12px 16px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
+    .btn-primary { background: #1f6feb; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; }
+    .btn-primary:hover { background: #1556b0; }
+    .btn-secondary { background: #f3f4f6; color: #111; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 12px; }
+    .btn-secondary:hover { background: #e9ecef; }
   </style>
   <script defer src="/app.js"></script>
   <script>
@@ -45,8 +60,9 @@
       <span id="currentPath" class="path">/</span>
       <button id="upBtn">上一级</button>
       <button id="refreshBtn">刷新</button>
-      <input type="file" id="uploadHidden" class="hidden" style="display:none" multiple />
+      <input type="file" id="uploadHidden" class="hidden" style="display:none" multiple webkitdirectory directory />
       <button id="uploadBtn">上传文件</button>
+      <button id="batchDownloadBtn">批量下载</button>
       <button id="batchDeleteBtn">批量删除</button>
       <button id="mkdirBtn">新建文件夹</button>
     </div>
@@ -56,7 +72,7 @@
     <table>
       <thead>
         <tr>
-          <th style="width:40px;">选择</th>
+          <th style="width:40px;"><input type="checkbox" id="selectAll" title="全选/取消全选" /></th>
           <th>名称</th>
           <th>类型</th>
           <th>大小</th>
@@ -67,5 +83,17 @@
       <tbody id="fileTableBody"></tbody>
     </table>
   </main>
+
+  <!-- 自定义弹框容器 -->
+  <div id="modalOverlay" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle">提示</div>
+        <button class="modal-close" id="modalClose" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
 </body>
 </html>
