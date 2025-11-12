@@ -12,7 +12,7 @@
 
     <groupId>com.xiaoxin</groupId>
     <artifactId>share-file-unsafe</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>share-file-unsafe</name>
     <description>用于内部网的简单文件共享服务 (无加密版)</description>
 
