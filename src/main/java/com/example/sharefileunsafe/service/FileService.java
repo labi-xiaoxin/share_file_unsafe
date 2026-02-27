@@ -204,64 +204,55 @@ public class FileService {
      * 将给定的路径（文件或目录）压缩为Zip并写入输出流。
      * 目录会以其自身名称作为Zip中的顶层目录。
      */
-    public void zipPaths(List<String> paths, OutputStream out) {
+    public void zipPaths(List<String> paths, OutputStream out) throws IOException {
         Objects.requireNonNull(paths, "paths");
         try (ZipOutputStream zos = new ZipOutputStream(out)) {
             for (String pathStr : paths) {
                 Path p = resolve(pathStr);
                 if (!Files.exists(p)) {
-                    // 跳过不存在的路径
                     continue;
                 }
                 if (Files.isDirectory(p)) {
                     String top = p.getFileName() != null ? p.getFileName().toString() : p.toString();
-                    // 遍历目录并写入条目（跳过根本身的重复目录条目）
                     try (Stream<Path> walk = Files.walk(p)) {
-                        walk.forEach(pp -> {
+                        for (java.util.Iterator<Path> it = walk.iterator(); it.hasNext(); ) {
+                            Path pp = it.next();
                             String rel = p.relativize(pp).toString().replace('\\', '/');
                             String entryName = top + (rel.isEmpty() ? "" : "/" + rel);
-                            try {
-                                if (Files.isDirectory(pp)) {
-                                    // 为目录写入占位条目
-                                    String dirName = entryName.endsWith("/") ? entryName : (entryName + "/");
-                                    zos.putNextEntry(new ZipEntry(dirName));
-                                    zos.closeEntry();
-                                } else {
-                                    // 写入文件内容
-                                    zos.putNextEntry(new ZipEntry(entryName));
-                                    byte[] buf = new byte[8192];
-                                    try (InputStream in = Files.newInputStream(pp, StandardOpenOption.READ)) {
-                                        int len;
-                                        while ((len = in.read(buf)) > 0) {
-                                            zos.write(buf, 0, len);
-                                        }
-                                    }
-                                    zos.closeEntry();
-                                }
-                            } catch (IOException e) {
-                                throw new RuntimeException("Failed to zip entry: " + pp, e);
+
+                            if (Files.isDirectory(pp)) {
+                                String dirName = entryName.endsWith("/") ? entryName : (entryName + "/");
+                                zos.putNextEntry(new ZipEntry(dirName));
+                                zos.closeEntry();
+                                continue;
                             }
-                        });
+
+                            zos.putNextEntry(new ZipEntry(entryName));
+                            byte[] buf = new byte[8192];
+                            try (InputStream in = Files.newInputStream(pp, StandardOpenOption.READ)) {
+                                int len;
+                                while ((len = in.read(buf)) > 0) {
+                                    zos.write(buf, 0, len);
+                                }
+                            }
+                            zos.closeEntry();
+                        }
                     }
                 } else {
                     String entryName = p.getFileName() != null ? p.getFileName().toString() : p.toString();
-                    try {
-                        zos.putNextEntry(new ZipEntry(entryName));
-                        byte[] buf = new byte[8192];
-                        try (InputStream in = Files.newInputStream(p, StandardOpenOption.READ)) {
-                            int len;
-                            while ((len = in.read(buf)) > 0) {
-                                zos.write(buf, 0, len);
-                            }
+                    zos.putNextEntry(new ZipEntry(entryName));
+                    byte[] buf = new byte[8192];
+                    try (InputStream in = Files.newInputStream(p, StandardOpenOption.READ)) {
+                        int len;
+                        while ((len = in.read(buf)) > 0) {
+                            zos.write(buf, 0, len);
                         }
-                        zos.closeEntry();
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to zip file: " + p, e);
                     }
+                    zos.closeEntry();
                 }
             }
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create zip", e);
+            zos.finish();
+            zos.flush();
         }
     }
 }

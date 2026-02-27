@@ -1,0 +1,6 @@
+target/
+share-root/
+*.log
+*.pid
+.DS_Store
+**/.DS_Store
